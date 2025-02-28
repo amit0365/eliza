@@ -22,12 +22,7 @@ function App() {
     useVersion();
     return (
         <QueryClientProvider client={queryClient}>
-            <div
-                className="dark antialiased"
-                style={{
-                    colorScheme: "dark",
-                }}
-            >
+            <div className="antialiased">
                 <BrowserRouter>
                     <TooltipProvider delayDuration={0}>
                         <SidebarProvider>
