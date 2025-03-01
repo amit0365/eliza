@@ -42,6 +42,7 @@ export async function multiTurnComputerUse(args: {
     tokenEfficientTools = false,
   } = args;
 
+  elizaLogger.info("model", model);
   // 1) Prepare the standard endpoint
   const url = "https://api.anthropic.com/v1/messages";
 
