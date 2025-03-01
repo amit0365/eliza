@@ -1,18 +1,6 @@
 import axios from "axios";
 import { elizaLogger } from "@elizaos/core";
 
-function len(str: string): number {
-  return Math.round(str.split(/\s+/).length);
-}
-
-function PromptLength(systemPrompt: string, messages: any[]): number {
-  let total = len(systemPrompt);
-  for (const msg of messages) {
-    total += len(String(msg.content || ""));
-  }
-  return total;
-}
-
 // Suppose we have these imports from your tools directory:
 import { ToolCollection } from "./tools/collection";
 import { ComputerTool20250124 } from "./tools/computer";
@@ -79,24 +67,6 @@ export async function multiTurnComputerUse(args: {
     "anthropic-beta": anthropicBetaHeader,
   };
 
-  // function maybePruneIfTooLong() {
-  //   let approx = PromptLength(systemPrompt, messages);
-  //   // we want to keep it under ~200k tokens to be safe
-  //   const TOKEN_LIMIT = 200000;
-  //   while (approx > TOKEN_LIMIT && messages.length > 1) {
-  //     elizaLogger.warn(
-  //       `[multiTurnComputerUse] Approx tokens: ${approx} > limit ${TOKEN_LIMIT}. Removing oldest user+assistant.`
-  //     );
-  //     // remove the earliest messages. 
-  //     // Typically remove first 2 (a user + assistant pair).
-  //     let removed = messages.splice(0, 2);
-  //     approx = PromptLength(systemPrompt, messages);
-  //   }
-  //   return approx;
-  // }
-
-  elizaLogger.info("[multiTurnComputerUse] System prompt", systemPrompt);
-  elizaLogger.info("[multiTurnComputerUse] Messages", messages);
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
   const tools = toolCollection.toParams();
@@ -108,7 +78,7 @@ export async function multiTurnComputerUse(args: {
     // (the standard endpoint forbids "betas" in body).
     const body = {
       model,
-      max_tokens: 204648,
+      max_tokens: 1024,
       system: systemPrompt,
       messages,
       tools,
