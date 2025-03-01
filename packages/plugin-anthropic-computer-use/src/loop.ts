@@ -82,7 +82,7 @@ export async function multiTurnComputerUse(args: {
 
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
-  const tools = toolCollectionV2.toParams();
+  const tools = toolCollectionV1.toParams();
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
@@ -135,7 +135,7 @@ export async function multiTurnComputerUse(args: {
       try {
         // Call your local tool
         elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const result = await toolCollectionV2.run(name, input || {});
+        const result = await toolCollectionV1.run(name, input || {});
         // Convert result => {type:"tool_result", tool_use_id, content}
         const toolResultBlock = {
           type: "tool_result",
