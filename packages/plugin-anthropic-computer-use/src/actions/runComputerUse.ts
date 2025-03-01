@@ -86,7 +86,7 @@ export const computerUseAction: Action = {
   validate: async (runtime: IAgentRuntime) => {
     // Ensure we have an Anthropic key or relevant config
     await validateAnthropicConfig(runtime);
-    return false;
+    return true;
   },
   handler: async (
     runtime: IAgentRuntime,
@@ -132,7 +132,8 @@ export const computerUseAction: Action = {
       const finalMessages = await multiTurnComputerUse({
         apiKey: config.ANTHROPIC_API_KEY,
         messages: conversation,
-        ephemeralPromptCaching: true,
+        ephemeralPromptCaching: false,
+        tokenEfficientTools: true,
       });
 
       // 7) finalMessages is updated conversation with assistant responses + tool results

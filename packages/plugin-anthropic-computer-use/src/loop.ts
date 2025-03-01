@@ -31,13 +31,15 @@ export async function multiTurnComputerUse(args: {
   systemPrompt?: string;
   messages: ChatMessage[];
   ephemeralPromptCaching?: boolean; // if you want "prompt-caching-2024-07-31" in the header
+  tokenEfficientTools?: boolean; // if you want "token-efficient-tools-2025-02-19" in the header
 }): Promise<ChatMessage[]> {
   const {
     apiKey,
-    model = "claude-3-7-sonnet-20241022",
+    model = "claude-3-7-sonnet-20250124",
     systemPrompt = "You can use the 'computer' or 'bash' tools to open websites, run commands, etc.",
     messages,
     ephemeralPromptCaching = false,
+    tokenEfficientTools = false,
   } = args;
 
   // 1) Prepare the standard endpoint
@@ -59,9 +61,12 @@ export async function multiTurnComputerUse(args: {
 
   // 3) Build Beta flags for the "anthropic-beta" header
   // Must always include "computer-use-2025-01-24" to enable your computer_20250124 tool
-  const betaFlags: string[] = ["computer-use-2024-10-22"];
+  const betaFlags: string[] = ["computer-use-2025-01-24"];
   if (ephemeralPromptCaching) {
     betaFlags.push("prompt-caching-2024-07-31");
+  }
+  if (tokenEfficientTools) {
+    betaFlags.push("token-efficient-tools-2025-02-19");
   }
   const anthropicBetaHeader = betaFlags.join(",");
 
@@ -76,7 +81,7 @@ export async function multiTurnComputerUse(args: {
 
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
-  const tools = toolCollectionV1.toParams();
+  const tools = toolCollectionV2.toParams();
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
@@ -129,7 +134,7 @@ export async function multiTurnComputerUse(args: {
       try {
         // Call your local tool
         elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const result = await toolCollectionV1.run(name, input || {});
+        const result = await toolCollectionV2.run(name, input || {});
         // Convert result => {type:"tool_result", tool_use_id, content}
         const toolResultBlock = {
           type: "tool_result",
