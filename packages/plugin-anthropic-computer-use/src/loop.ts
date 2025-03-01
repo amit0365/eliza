@@ -1,105 +1,17 @@
-// import axios from "axios";
-// import { elizaLogger} from "@elizaos/core";
-
-// /**
-//  * Example: We define a multi-turn loop function that handles:
-//  *  1) Sending the conversation so far to Anthropic
-//  *  2) If we see a "tool_use" block => we produce a "tool_result" user message
-//  *  3) Repeat until no more tool use
-//  */
-// export async function multiTurnComputerUse({
-//   apiKey,
-//   systemPrompt = "You can open websites or do screenshots.",
-//   messages,
-//   model = "claude-3-7-sonnet-20250219",
-//   ephemeralPromptCaching = false,
-// }: {
-//   apiKey: string;
-//   systemPrompt?: string;
-//   messages: { role: string; content: string }[];
-//   model?: string;
-//   ephemeralPromptCaching?: boolean;
-// }) {
-//   const url = "https://api.anthropic.com/v1/messages";
-
-//   // Build anthropic-beta header
-//   // to enable "computer_use_20250124" => "computer-use-2025-01-24"
-//   // optionally ephemeral caching => "prompt-caching-2024-07-31"
-//   let flags = ["computer-use-2025-01-24"];
-//   if (ephemeralPromptCaching) {
-//     flags.push("prompt-caching-2024-07-31");
-//   }
-//   const anthropicBeta = flags.join(",");
-
-//   const headers = {
-//     "x-api-key": apiKey,
-//     "content-type": "application/json",
-//     "anthropic-version": "2023-06-01",
-//     "anthropic-beta": anthropicBeta
-//   };
-
-//   // We'll define the "computer" tool referencing the 2025 version
-//   const tools = [
-//     {
-//       type: "computer_20250124",
-//       name: "computer",
-//       display_width_px: 1024,
-//       display_height_px: 768
-//     }
-//   ];
-
-//   while (true) {
-//     elizaLogger.info("=== Full loop iteration ===");
-//     // 1) post the conversation so far
-//     const body = {
-//       model,
-//       max_tokens: 1024,
-//       system: systemPrompt,
-//       messages,
-//       tools
-//     };
-
-//     elizaLogger.debug("Sending body =>", JSON.stringify(body, null, 2));
-//     const response = await axios.post(url, body, { headers });
-//     const data = response.data;
-//     elizaLogger.debug("Anthropic response =>", JSON.stringify(data, null, 2));
-
-//     // we treat the blocks as e.g. data.content
-//     const blocks = data.content || [];
-
-//     // We'll store them as an assistant message
-//     messages.push({
-//       role: "assistant",
-//       content: JSON.stringify(blocks)
-//     });
-
-//     // 2) check if there's a "tool_use"
-//     const toolUses = blocks.filter((b: any) => b.type === "tool_use");
-//     if (!toolUses.length) {
-//       // no tool => done
-//       return messages;
-//     }
-
-//     // 3) produce a single user message with tool_results
-//     // In a real environment, you parse each block.input => run real actions
-//     // For a demo, we just return "Pretend we did it"
-//     const toolResultBlocks = toolUses.map((use: any) => ({
-//       type: "tool_result",
-//       tool_use_id: use.id,
-//       content: { output: "Pretend we opened the website or took screenshot" }
-//     }));
-
-//     // add that as user message
-//     messages.push({
-//       role: "user",
-//       content: JSON.stringify(toolResultBlocks)
-//     });
-//   }
-// }
-
-
 import axios from "axios";
 import { elizaLogger } from "@elizaos/core";
+
+function len(str: string): number {
+  return Math.round(str.split(/\s+/).length);
+}
+
+function PromptLength(systemPrompt: string, messages: any[]): number {
+  let total = len(systemPrompt);
+  for (const msg of messages) {
+    total += len(String(msg.content || ""));
+  }
+  return total;
+}
 
 // Suppose we have these imports from your tools directory:
 import { ToolCollection } from "./tools/collection";
@@ -167,6 +79,24 @@ export async function multiTurnComputerUse(args: {
     "anthropic-beta": anthropicBetaHeader,
   };
 
+  // function maybePruneIfTooLong() {
+  //   let approx = PromptLength(systemPrompt, messages);
+  //   // we want to keep it under ~200k tokens to be safe
+  //   const TOKEN_LIMIT = 200000;
+  //   while (approx > TOKEN_LIMIT && messages.length > 1) {
+  //     elizaLogger.warn(
+  //       `[multiTurnComputerUse] Approx tokens: ${approx} > limit ${TOKEN_LIMIT}. Removing oldest user+assistant.`
+  //     );
+  //     // remove the earliest messages. 
+  //     // Typically remove first 2 (a user + assistant pair).
+  //     let removed = messages.splice(0, 2);
+  //     approx = PromptLength(systemPrompt, messages);
+  //   }
+  //   return approx;
+  // }
+
+  elizaLogger.info("[multiTurnComputerUse] System prompt", systemPrompt);
+  elizaLogger.info("[multiTurnComputerUse] Messages", messages);
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
   const tools = toolCollection.toParams();
@@ -178,7 +108,7 @@ export async function multiTurnComputerUse(args: {
     // (the standard endpoint forbids "betas" in body).
     const body = {
       model,
-      max_tokens: 1024,
+      max_tokens: 204648,
       system: systemPrompt,
       messages,
       tools,
