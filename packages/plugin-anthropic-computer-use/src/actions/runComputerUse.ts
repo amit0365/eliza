@@ -86,7 +86,7 @@ export const computerUseAction: Action = {
   validate: async (runtime: IAgentRuntime) => {
     // Ensure we have an Anthropic key or relevant config
     await validateAnthropicConfig(runtime);
-    return true;
+    return false;
   },
   handler: async (
     runtime: IAgentRuntime,

@@ -6,7 +6,9 @@ import { ToolCollection } from "./tools/collection";
 import { ComputerTool20250124 } from "./tools/computer";
 import { BashTool20250124 } from "./tools/bash";
 import { EditTool20250124 } from "./tools/edit";
-// Or wherever you keep these classes
+import { ComputerTool20241022 } from "./tools/computer";
+import { BashTool20241022 } from "./tools/bash";
+import { EditTool20241022 } from "./tools/edit";
 
 /**
  * Minimal shape for each user or assistant message.
@@ -32,7 +34,7 @@ export async function multiTurnComputerUse(args: {
 }): Promise<ChatMessage[]> {
   const {
     apiKey,
-    model = "claude-3-7-sonnet-20250219",
+    model = "claude-3-7-sonnet-20241022",
     systemPrompt = "You can use the 'computer' or 'bash' tools to open websites, run commands, etc.",
     messages,
     ephemeralPromptCaching = false,
@@ -44,15 +46,20 @@ export async function multiTurnComputerUse(args: {
   // 2) Build a "toolCollection" with your existing tool classes
   // e.g. we have "ComputerTool20250124", "BashTool20250124", "EditTool20250124"
   // If you only need "computer", just remove the others
-  const toolCollection = new ToolCollection(
+  const toolCollectionV2 = new ToolCollection(
     new ComputerTool20250124(),
     new BashTool20250124(),
     new EditTool20250124()
   );
+  const toolCollectionV1 = new ToolCollection(
+    new ComputerTool20241022(),
+    new BashTool20241022(),
+    new EditTool20241022()
+  );
 
   // 3) Build Beta flags for the "anthropic-beta" header
   // Must always include "computer-use-2025-01-24" to enable your computer_20250124 tool
-  const betaFlags: string[] = ["computer-use-2025-01-24"];
+  const betaFlags: string[] = ["computer-use-2024-10-22"];
   if (ephemeralPromptCaching) {
     betaFlags.push("prompt-caching-2024-07-31");
   }
@@ -69,7 +76,7 @@ export async function multiTurnComputerUse(args: {
 
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
-  const tools = toolCollection.toParams();
+  const tools = toolCollectionV1.toParams();
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
@@ -122,7 +129,7 @@ export async function multiTurnComputerUse(args: {
       try {
         // Call your local tool
         elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const result = await toolCollection.run(name, input || {});
+        const result = await toolCollectionV1.run(name, input || {});
         // Convert result => {type:"tool_result", tool_use_id, content}
         const toolResultBlock = {
           type: "tool_result",
