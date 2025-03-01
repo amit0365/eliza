@@ -35,7 +35,7 @@ export async function multiTurnComputerUse(args: {
 }): Promise<ChatMessage[]> {
   const {
     apiKey,
-    model = "claude-3-7-sonnet-20250124",
+    model = "claude-3-7-sonnet-20250219",
     systemPrompt = "You can use the 'computer' or 'bash' tools to open websites, run commands, etc.",
     messages,
     ephemeralPromptCaching = false,
