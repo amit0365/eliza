@@ -61,8 +61,16 @@ export async function multiTurnComputerUse(args: {
   );
 
   // 3) Build Beta flags for the "anthropic-beta" header
-  // Must always include "computer-use-2025-01-24" to enable your computer_20250124 tool
-  const betaFlags: string[] = ["computer-use-2025-01-24"];
+  // Include appropriate beta flag based on model version
+  const betaFlags: string[] = [];
+  
+  // Add the appropriate computer-use beta flag based on model version
+  if (model.includes("20250124")) {
+    betaFlags.push("computer-use-2025-01-24");
+  } else {
+    betaFlags.push("computer-use-2024-10-22");
+  }
+  
   if (ephemeralPromptCaching) {
     betaFlags.push("prompt-caching-2024-07-31");
   }
@@ -82,7 +90,7 @@ export async function multiTurnComputerUse(args: {
 
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
-  const tools = toolCollectionV1.toParams();
+  const tools = model.includes("20250124") ? toolCollectionV2.toParams() : toolCollectionV1.toParams();
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
@@ -135,7 +143,8 @@ export async function multiTurnComputerUse(args: {
       try {
         // Call your local tool
         elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const result = await toolCollectionV1.run(name, input || {});
+        const toolCollection = model.includes("20250124") ? toolCollectionV2 : toolCollectionV1;
+        const result = await toolCollection.run(name, input || {});
         // Convert result => {type:"tool_result", tool_use_id, content}
         const toolResultBlock = {
           type: "tool_result",
