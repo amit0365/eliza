@@ -724,6 +724,7 @@ export async function generateText({
                     baseURL,
                     fetch: runtime.fetch,
                 });
+                elizaLogger.info("Anthropic model:", anthropic.languageModel(model));
                 const { text: anthropicResponse } = await aiGenerateText({
                     model: anthropic.languageModel(model),
                     prompt: context,
