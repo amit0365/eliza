@@ -132,8 +132,8 @@ export const computerUseAction: Action = {
       const finalMessages = await multiTurnComputerUse({
         apiKey: config.ANTHROPIC_API_KEY,
         messages: conversation,
-        ephemeralPromptCaching: false,
-        tokenEfficientTools: false,
+        ephemeralPromptCaching: true,
+        tokenEfficientTools: true,
       });
 
       // 7) finalMessages is updated conversation with assistant responses + tool results
