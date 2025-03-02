@@ -99,8 +99,12 @@ export async function multiTurnComputerUse(args: {
     // (the standard endpoint forbids "betas" in body).
     const body = {
       model,
-      max_tokens: 1024,
-      stream: true,
+      max_tokens: 40000,
+      // thinking: {
+      //   type: "enabled",
+      //   budget_tokens: 16000,
+      // },
+      stream: false,
       system: systemPrompt,
       messages,
       tools,
@@ -110,7 +114,7 @@ export async function multiTurnComputerUse(args: {
     let response;
     try {
       response = await axios.post(url, body, { headers });
-      elizaLogger.info("[multiTurnComputerUse] Response =>", response);
+      elizaLogger.info("[multiTurnComputerUse] Response =>", response.data);
     } catch (err: any) {
       elizaLogger.error("[multiTurnComputerUse] Request error:", err.response?.data || err.message);
       // Return the messages so far
