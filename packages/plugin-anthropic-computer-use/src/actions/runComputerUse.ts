@@ -133,7 +133,7 @@ export const computerUseAction: Action = {
         apiKey: config.ANTHROPIC_API_KEY,
         messages: conversation,
         ephemeralPromptCaching: true,
-        tokenEfficientTools: true,
+        tokenEfficientTools: false,
       });
 
       // 7) finalMessages is updated conversation with assistant responses + tool results
