@@ -100,6 +100,7 @@ export async function multiTurnComputerUse(args: {
     const body = {
       model,
       max_tokens: 1024,
+      stream: true,
       system: systemPrompt,
       messages,
       tools,
