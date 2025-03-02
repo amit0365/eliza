@@ -99,7 +99,7 @@ export async function multiTurnComputerUse(args: {
     // (the standard endpoint forbids "betas" in body).
     const body = {
       model,
-      max_tokens: 40000,
+      max_tokens: 4096, // output tokens
       // thinking: {
       //   type: "enabled",
       //   budget_tokens: 16000,
