@@ -110,6 +110,7 @@ export async function multiTurnComputerUse(args: {
     let response;
     try {
       response = await axios.post(url, body, { headers });
+      elizaLogger.info("[multiTurnComputerUse] Response =>", response);
     } catch (err: any) {
       elizaLogger.error("[multiTurnComputerUse] Request error:", err.response?.data || err.message);
       // Return the messages so far
