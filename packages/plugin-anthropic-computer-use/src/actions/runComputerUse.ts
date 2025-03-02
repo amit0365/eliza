@@ -132,7 +132,7 @@ export const computerUseAction: Action = {
       const finalMessages = await multiTurnComputerUse({
         apiKey: config.ANTHROPIC_API_KEY,
         messages: conversation,
-        ephemeralPromptCaching: false,
+        ephemeralPromptCaching: true,
         tokenEfficientTools: false,
       });
 

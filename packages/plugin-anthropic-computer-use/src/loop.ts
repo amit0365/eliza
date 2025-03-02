@@ -9,7 +9,7 @@ import { EditTool20250124 } from "./tools/edit";
 import { ComputerTool20241022 } from "./tools/computer";
 import { BashTool20241022 } from "./tools/bash";
 import { EditTool20241022 } from "./tools/edit";
-
+import { _injectPromptCaching, _maybeFilterToNMostRecentImages } from "./services";
 /**
  * Minimal shape for each user or assistant message.
  */
@@ -93,6 +93,28 @@ export async function multiTurnComputerUse(args: {
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
+
+    // Before the next request, mark ephemeral blocks + reduce old images
+    // We'll interpret your "BetaMessageParam" shape as:
+    //    { role: "user"|"assistant", content: BetaContentBlockParam[] } 
+    // or JSON string with blocks. 
+    // If your ChatMessage.content is still a raw string, parse it first.
+    for (const msg of messages) {
+      if (msg.content.startsWith("[") || msg.content.startsWith("{")) {
+        try {
+          msg.content = JSON.parse(msg.content); 
+        } catch {}
+      }
+    }
+
+    // For ephemeral marking, we only do it if ephemeralPromptCaching===true
+    if (ephemeralPromptCaching) {
+      _injectPromptCaching(messages as any); 
+    }
+
+    // Filter to keep 2 most recent images, removing older ones:
+    _maybeFilterToNMostRecentImages(messages as any, /*imagesToKeep=*/2, /*minRemovalThreshold=*/1);
+
 
     // 5) Construct the request body with a top-level system, no "betas" field
     // (the standard endpoint forbids "betas" in body).
