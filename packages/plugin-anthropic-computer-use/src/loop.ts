@@ -10,6 +10,7 @@ import { ComputerTool20241022 } from "./tools/computer";
 import { BashTool20241022 } from "./tools/bash";
 import { EditTool20241022 } from "./tools/edit";
 import { _injectPromptCaching, _maybeFilterToNMostRecentImages } from "./services";
+
 /**
  * Minimal shape for each user or assistant message.
  */
@@ -94,37 +95,36 @@ export async function multiTurnComputerUse(args: {
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
 
-    // Before the next request, mark ephemeral blocks + reduce old images
-    // We'll interpret your "BetaMessageParam" shape as:
-    //    { role: "user"|"assistant", content: BetaContentBlockParam[] } 
-    // or JSON string with blocks. 
-    // If your ChatMessage.content is still a raw string, parse it first.
+    // -------------------------------------------------------------------------
+    //  (A) Before each request: ephemeral & image filtering
+    // -------------------------------------------------------------------------
+    // If your ChatMessage.content is JSON string, parse to blocks so the
+    // ephemeral & image filter helpers can operate properly.
     for (const msg of messages) {
-      if (msg.content.startsWith("[") || msg.content.startsWith("{")) {
-        try {
-          msg.content = JSON.parse(msg.content); 
-        } catch {}
+      if (typeof msg.content === "string") {
+        const trimmed = msg.content.trim();
+        if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+          try {
+            msg.content = JSON.parse(trimmed);
+          } catch {
+            // keep it as string if parse fails
+          }
+        }
       }
     }
 
-    // For ephemeral marking, we only do it if ephemeralPromptCaching===true
+    // If ephemeralPromptCaching => mark ephemeral for last ~3 user messages
     if (ephemeralPromptCaching) {
-      _injectPromptCaching(messages as any); 
+      _injectPromptCaching(messages as any);
     }
 
-    // Filter to keep 2 most recent images, removing older ones:
+    // Keep only 2 most recent images among all tool_results, remove older
     _maybeFilterToNMostRecentImages(messages as any, /*imagesToKeep=*/2, /*minRemovalThreshold=*/1);
 
-
-    // 5) Construct the request body with a top-level system, no "betas" field
-    // (the standard endpoint forbids "betas" in body).
+    // 5) Construct the request body with top-level system & your messages
     const body = {
       model,
       max_tokens: 4096, // output tokens
-      // thinking: {
-      //   type: "enabled",
-      //   budget_tokens: 16000,
-      // },
       stream: false,
       system: systemPrompt,
       messages,
@@ -138,17 +138,17 @@ export async function multiTurnComputerUse(args: {
       elizaLogger.info("[multiTurnComputerUse] Response =>", response.data);
     } catch (err: any) {
       elizaLogger.error("[multiTurnComputerUse] Request error:", err.response?.data || err.message);
-      // Return the messages so far
+      // Return the messages so far (so you can examine them)
       return messages;
     }
 
     const data = response.data;
     elizaLogger.debug("[multiTurnComputerUse] Response =>", JSON.stringify(data, null, 2));
 
-    // The model's content is an array of blocks, e.g. {type:"text",text:"..."}, {type:"tool_use",...}
+    // The model's content is an array of blocks, e.g. {type:"text", text:"..."}, {type:"tool_use", ...}
     const blocks = data.content || [];
 
-    // 7) Append an assistant message with these blocks in JSON form
+    // 7) Append an assistant message with these blocks (as JSON string)
     messages.push({
       role: "assistant",
       content: JSON.stringify(blocks),
@@ -162,47 +162,72 @@ export async function multiTurnComputerUse(args: {
       return messages;
     }
 
-    // 9) For each tool_use block, run the local tool
-    // We produce "tool_result" blocks. We'll store them in a single user message next iteration
+    // 9) For each tool_use block, run the local tool => produce "tool_result" blocks
     const toolResultBlocks: any[] = [];
     for (const tublock of toolUseBlocks) {
       const { name, input, id } = tublock;
       try {
-        // Call your local tool
         elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const toolCollection = model.includes("20250124") ? toolCollectionV2 : toolCollectionV1;
-        const result = await toolCollection.run(name, input || {});
-        // Convert result => {type:"tool_result", tool_use_id, content}
-        const toolResultBlock = {
+        const chosenToolCollection = model.includes("20250124") ? toolCollectionV2 : toolCollectionV1;
+        const result = await chosenToolCollection.run(name, input || {});
+
+        // Build the final tool_result block in a valid format
+        const toolResultBlock: any = {
           type: "tool_result",
           tool_use_id: id,
-          content: {},
         };
 
         if (result.error) {
-          toolResultBlock.content = { error: result.error };
-          toolResultBlock["is_error"] = true;
+          toolResultBlock.is_error = true;
+          // EITHER a string:
+          toolResultBlock.content = `Error: ${result.error}`;
         } else {
-          const { output, base64_image } = result;
-          const contentObj: Record<string, any> = {};
-          if (output) contentObj.output = output;
-          if (base64_image) contentObj.base64_image = base64_image;
-          toolResultBlock.content = contentObj;
+          // We'll build an array of sub-blocks
+          const subBlocks: any[] = [];
+
+          if (result.output) {
+            subBlocks.push({
+              type: "text",
+              text: result.output
+            });
+          }
+          if (result.base64_image) {
+            subBlocks.push({
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: result.base64_image
+              }
+            });
+          }
+
+          // If no content at all, just say "No output."
+          if (subBlocks.length === 0) {
+            subBlocks.push({
+              type: "text",
+              text: "No output."
+            });
+          }
+
+          // Now assign that array to content
+          toolResultBlock.content = subBlocks;
         }
 
         toolResultBlocks.push(toolResultBlock);
+
       } catch (err: any) {
         // If the local tool threw an error
         toolResultBlocks.push({
           type: "tool_result",
           tool_use_id: id,
           is_error: true,
-          content: { error: String(err.message || err) },
+          content: `Tool invocation error: ${String(err.message || err)}`
         });
       }
     }
 
-    // 10) Add a "user" message with these tool_result blocks
+    // 10) Add a "user" message with these tool_result blocks => next iteration
     messages.push({
       role: "user",
       content: JSON.stringify(toolResultBlocks),
