@@ -36,7 +36,7 @@ export async function multiTurnComputerUse(args: {
 }): Promise<ChatMessage[]> {
   const {
     apiKey,
-    model = "claude-3-5-sonnet-20241022",
+    model = "claude-3-7-sonnet-20250219",
     systemPrompt = "You can use the 'computer' or 'bash' tools to open websites, run commands, etc.",
     messages,
     ephemeralPromptCaching = false,
@@ -65,7 +65,7 @@ export async function multiTurnComputerUse(args: {
   const betaFlags: string[] = [];
   
   // Add the appropriate computer-use beta flag based on model version
-  if (model.includes("20250124")) {
+  if (model.includes("2025")) {
     betaFlags.push("computer-use-2025-01-24");
   } else {
     betaFlags.push("computer-use-2024-10-22");
@@ -90,7 +90,7 @@ export async function multiTurnComputerUse(args: {
 
   // We'll define the tools array for the standard endpoint
   // We rely on each tool's `toParams()` to get name, type, and display info, etc.
-  const tools = model.includes("20250124") ? toolCollectionV2.toParams() : toolCollectionV1.toParams();
+  const tools = model.includes("2025") ? toolCollectionV2.toParams() : toolCollectionV1.toParams();
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
@@ -168,7 +168,7 @@ export async function multiTurnComputerUse(args: {
       const { name, input, id } = tublock;
       try {
         elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const chosenToolCollection = model.includes("20250124") ? toolCollectionV2 : toolCollectionV1;
+        const chosenToolCollection = model.includes("2025") ? toolCollectionV2 : toolCollectionV1;
         const result = await chosenToolCollection.run(name, input || {});
 
         // Build the final tool_result block in a valid format
