@@ -626,7 +626,7 @@ export async function createAgent(
         character,
         // character.plugins are handled when clients are added
         plugins: [
-            bootstrapPlugin,
+            //bootstrapPlugin,
         ]
             .flat()
             .filter(Boolean),
