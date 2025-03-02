@@ -11,9 +11,6 @@ import { BashTool20241022 } from "./tools/bash";
 import { EditTool20241022 } from "./tools/edit";
 import { _injectPromptCaching, _maybeFilterToNMostRecentImages } from "./services";
 
-/**
- * Minimal shape for each user or assistant message.
- */
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string; // if content is blocks, we'll store them as a JSON string
@@ -22,17 +19,20 @@ export interface ChatMessage {
 /**
  * multiTurnComputerUse: A multi-turn loop calling the standard endpoint `/v1/messages`
  * with a top-level system prompt, user messages, and "tools" referencing your 
- * existing "computer", "bash", or "edit" tool classes. If the model requests a 
- * "tool_use", we run the tool via `toolCollection.run(name, input)` and produce 
+ * existing "computer", "bash", or "edit" tool classes. If the model requests
+ * a "tool_use", we run the tool via `toolCollection.run(name, input)` and produce
  * a "tool_result" block. This repeats until no more tool usage is requested.
+ *
+ * Note: We do NOT inject any Eliza text here; the user only sees the final
+ * 'assistant' messages from the model. 
  */
 export async function multiTurnComputerUse(args: {
   apiKey: string;
   model?: string;
   systemPrompt?: string;
   messages: ChatMessage[];
-  ephemeralPromptCaching?: boolean; // if you want "prompt-caching-2024-07-31" in the header
-  tokenEfficientTools?: boolean; // if you want "token-efficient-tools-2025-02-19" in the header
+  ephemeralPromptCaching?: boolean; 
+  tokenEfficientTools?: boolean; 
 }): Promise<ChatMessage[]> {
   const {
     apiKey,
@@ -43,12 +43,9 @@ export async function multiTurnComputerUse(args: {
     tokenEfficientTools = false,
   } = args;
 
-  // 1) Prepare the standard endpoint
   const url = "https://api.anthropic.com/v1/messages";
 
-  // 2) Build a "toolCollection" with your existing tool classes
-  // e.g. we have "ComputerTool20250124", "BashTool20250124", "EditTool20250124"
-  // If you only need "computer", just remove the others
+  // Build a "toolCollection" for each version
   const toolCollectionV2 = new ToolCollection(
     new ComputerTool20250124(),
     new BashTool20250124(),
@@ -60,17 +57,21 @@ export async function multiTurnComputerUse(args: {
     new EditTool20241022()
   );
 
-  // 3) Build Beta flags for the "anthropic-beta" header
-  // Include appropriate beta flag based on model version
-  const betaFlags: string[] = [];
-  
-  // Add the appropriate computer-use beta flag based on model version
+  // Decide which set of tools to use based on model version
+  let chosenToolCollection = toolCollectionV1;
+  let useV2 = false;
   if (model.includes("2025")) {
+    useV2 = true;
+    chosenToolCollection = toolCollectionV2;
+  }
+
+  // Build Beta flags
+  const betaFlags: string[] = [];
+  if (useV2) {
     betaFlags.push("computer-use-2025-01-24");
   } else {
     betaFlags.push("computer-use-2024-10-22");
   }
-  
   if (ephemeralPromptCaching) {
     betaFlags.push("prompt-caching-2024-07-31");
   }
@@ -79,27 +80,20 @@ export async function multiTurnComputerUse(args: {
   }
   const anthropicBetaHeader = betaFlags.join(",");
 
-  // 4) Build the standard endpoint request headers
   const headers = {
     "x-api-key": apiKey,
     "content-type": "application/json",
     "anthropic-version": "2023-06-01",
-    // Beta flags
     "anthropic-beta": anthropicBetaHeader,
   };
 
   // We'll define the tools array for the standard endpoint
-  // We rely on each tool's `toParams()` to get name, type, and display info, etc.
-  const tools = model.includes("2025") ? toolCollectionV2.toParams() : toolCollectionV1.toParams();
+  const tools = chosenToolCollection.toParams();
 
   while (true) {
     elizaLogger.info("[multiTurnComputerUse] Starting iteration...");
 
-    // -------------------------------------------------------------------------
-    //  (A) Before each request: ephemeral & image filtering
-    // -------------------------------------------------------------------------
-    // If your ChatMessage.content is JSON string, parse to blocks so the
-    // ephemeral & image filter helpers can operate properly.
+    // (A) Before each request, parse string -> blocks if needed
     for (const msg of messages) {
       if (typeof msg.content === "string") {
         const trimmed = msg.content.trim();
@@ -107,88 +101,82 @@ export async function multiTurnComputerUse(args: {
           try {
             msg.content = JSON.parse(trimmed);
           } catch {
-            // keep it as string if parse fails
+            // just leave it as string if parse fails
           }
         }
       }
     }
 
-    // If ephemeralPromptCaching => mark ephemeral for last ~3 user messages
+    // If ephemeral caching => mark ephemeral blocks in last ~3 user messages
     if (ephemeralPromptCaching) {
       _injectPromptCaching(messages as any);
     }
 
-    // Keep only 2 most recent images among all tool_results, remove older
-    _maybeFilterToNMostRecentImages(messages as any, /*imagesToKeep=*/2, /*minRemovalThreshold=*/1);
+    // Filter older images so we keep only 2
+    _maybeFilterToNMostRecentImages(messages as any, 2, 1);
 
-    // 5) Construct the request body with top-level system & your messages
+    // 5) Construct request body
     const body = {
       model,
-      max_tokens: 4096, // output tokens
+      max_tokens: 4096,
       stream: false,
       system: systemPrompt,
       messages,
       tools,
     };
 
-    // 6) POST to the standard endpoint
+    // 6) Call Anthropic
     let response;
     try {
       response = await axios.post(url, body, { headers });
       elizaLogger.info("[multiTurnComputerUse] Response =>", response.data);
     } catch (err: any) {
       elizaLogger.error("[multiTurnComputerUse] Request error:", err.response?.data || err.message);
-      // Return the messages so far (so you can examine them)
+      // Return the messages so the caller can handle or debug
       return messages;
     }
 
     const data = response.data;
-    elizaLogger.debug("[multiTurnComputerUse] Response =>", JSON.stringify(data, null, 2));
+    elizaLogger.debug("[multiTurnComputerUse] Received =>", JSON.stringify(data, null, 2));
 
-    // The model's content is an array of blocks, e.g. {type:"text", text:"..."}, {type:"tool_use", ...}
+    // The model's content is an array of blocks
     const blocks = data.content || [];
 
-    // 7) Append an assistant message with these blocks (as JSON string)
+    // 7) Append an assistant message with these blocks
     messages.push({
       role: "assistant",
       content: JSON.stringify(blocks),
     });
 
-    // 8) Check if any "tool_use" blocks appear
+    // 8) See if there's any "tool_use" request
     const toolUseBlocks = blocks.filter((b: any) => b.type === "tool_use");
     if (toolUseBlocks.length === 0) {
-      // no more usage => done
-      elizaLogger.info("[multiTurnComputerUse] no more tool_use => finishing");
+      elizaLogger.info("[multiTurnComputerUse] No more tool_use => finishing");
       return messages;
     }
 
-    // 9) For each tool_use block, run the local tool => produce "tool_result" blocks
+    // 9) For each tool request, run the local tool => produce "tool_result"
     const toolResultBlocks: any[] = [];
     for (const tublock of toolUseBlocks) {
       const { name, input, id } = tublock;
       try {
-        elizaLogger.info(`[multiTurnComputerUse] Running tool '${name}' with input:`, input);
-        const chosenToolCollection = model.includes("2025") ? toolCollectionV2 : toolCollectionV1;
+        elizaLogger.info(`Running tool '${name}' with input:`, input);
         const result = await chosenToolCollection.run(name, input || {});
 
-        // Build the final tool_result block in a valid format
-        const toolResultBlock: any = {
-          type: "tool_result",
-          tool_use_id: id,
-        };
-
+        // Must format tool_result content either as a string or array of blocks
         if (result.error) {
-          toolResultBlock.is_error = true;
-          // EITHER a string:
-          toolResultBlock.content = `Error: ${result.error}`;
+          toolResultBlocks.push({
+            type: "tool_result",
+            tool_use_id: id,
+            is_error: true,
+            content: `Error: ${result.error}`, 
+          });
         } else {
-          // We'll build an array of sub-blocks
           const subBlocks: any[] = [];
-
           if (result.output) {
             subBlocks.push({
               type: "text",
-              text: result.output
+              text: result.output,
             });
           }
           if (result.base64_image) {
@@ -197,37 +185,31 @@ export async function multiTurnComputerUse(args: {
               source: {
                 type: "base64",
                 media_type: "image/png",
-                data: result.base64_image
-              }
+                data: result.base64_image,
+              },
             });
           }
-
-          // If no content at all, just say "No output."
           if (subBlocks.length === 0) {
-            subBlocks.push({
-              type: "text",
-              text: "No output."
-            });
+            subBlocks.push({ type: "text", text: "No output." });
           }
-
-          // Now assign that array to content
-          toolResultBlock.content = subBlocks;
+          toolResultBlocks.push({
+            type: "tool_result",
+            tool_use_id: id,
+            is_error: false,
+            content: subBlocks,
+          });
         }
-
-        toolResultBlocks.push(toolResultBlock);
-
-      } catch (err: any) {
-        // If the local tool threw an error
+      } catch (toolErr: any) {
         toolResultBlocks.push({
           type: "tool_result",
           tool_use_id: id,
           is_error: true,
-          content: `Tool invocation error: ${String(err.message || err)}`
+          content: `Tool invocation error: ${String(toolErr.message || toolErr)}`,
         });
       }
     }
 
-    // 10) Add a "user" message with these tool_result blocks => next iteration
+    // 10) Add a user message with these tool_result blocks => triggers next iteration
     messages.push({
       role: "user",
       content: JSON.stringify(toolResultBlocks),

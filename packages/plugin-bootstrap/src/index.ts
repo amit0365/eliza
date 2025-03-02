@@ -21,14 +21,14 @@ export const bootstrapPlugin: Plugin = {
     description: "Agent bootstrap with basic actions and evaluators",
     actions: [
         continueAction,
-        // followRoomAction,
-        // unfollowRoomAction,
-        // ignoreAction,
+        followRoomAction,
+        unfollowRoomAction,
+        ignoreAction,
         noneAction,
-        // muteRoomAction,
-        // unmuteRoomAction,
+        muteRoomAction,
+        unmuteRoomAction,
     ],
-    evaluators: [], //[factEvaluator, goalEvaluator],
-    providers: [], //[boredomProvider, timeProvider, factsProvider],
+    evaluators: [factEvaluator, goalEvaluator],
+    providers: [boredomProvider, timeProvider, factsProvider],
 };
 export default bootstrapPlugin;

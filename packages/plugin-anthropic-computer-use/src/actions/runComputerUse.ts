@@ -10,8 +10,7 @@ import {
 } from "@elizaos/core";
 import { validateAnthropicConfig } from "../environment";
 import { getComputerUseExamples } from "../examples";
-import { multiTurnComputerUse } from "../loop"; 
-// IMPORTANT: ensure "multiTurnComputerUse" is exported from "../loop"
+import { multiTurnComputerUse } from "../loop";
 
 /**
  * Builds a Memory record for storing the entire computer-use conversation.
@@ -23,7 +22,7 @@ function createComputerUseMemory({
 }: {
   roomId: UUID;
   runtime: IAgentRuntime;
-  conversation: any[]; // typed or untyped array of conversation steps
+  conversation: any[];
 }): Memory {
   return {
     id: roomId,
@@ -75,19 +74,20 @@ function convertBlocksToText(content: any): string {
 
 /**
  * The Action that triggers a multi-turn "computer use" loop with the standard endpoint,
- * saving conversation to memory. Because we do NOT have "updateMemory," we do a 
- * deleteMemory + createMemory approach to overwrite the old record.
+ * saving conversation to memory (without an intermediate Eliza ack).
  */
 export const computerUseAction: Action = {
   name: "ANTHROPIC_COMPUTER_USE",
   similes: ["ANTHROPIC", "COMPUTER", "BASH", "TOOL", "BROWSE", "SEARCH", "OPEN", "WEBSITE"],
   description:
-    "Use Anthropic's agentic multi-turn loop to run local computer-use tools, browse websites, etc. and store conversation in memory without updateMemory.",
+    "Use Anthropic's agentic multi-turn loop to run local computer-use tools, browse websites, etc., storing conversation in memory. No Eliza intermediate message.",
+  
   validate: async (runtime: IAgentRuntime) => {
-    // Ensure we have an Anthropic key or relevant config
+    // Ensure we have an Anthropic key
     await validateAnthropicConfig(runtime);
     return true;
   },
+
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
@@ -96,10 +96,10 @@ export const computerUseAction: Action = {
     callback: HandlerCallback
   ) => {
     try {
-      // 1) Identify the memory record ID
+      // 1) Identify the memory record by roomId
       const roomId = ("anthropic_computeruse_" + runtime.agentId) as UUID;
 
-      // 2) Attempt to load existing memory
+      // 2) Try to load existing memory
       let existingMemory = await runtime.messageManager.getMemoryById(roomId);
 
       if (!existingMemory) {
@@ -109,11 +109,10 @@ export const computerUseAction: Action = {
           runtime,
           conversation: [],
         });
-        // store it
         await runtime.messageManager.createMemory(existingMemory);
       }
 
-      // 3) Retrieve conversation array
+      // 3) Retrieve the conversation array
       const conversation = (existingMemory.content.conversation as any[]) || [];
 
       // 4) Append the user's new message
@@ -125,23 +124,18 @@ export const computerUseAction: Action = {
       const anthropicKey = config.ANTHROPIC_API_KEY;
 
       // 6) Call the multi-turn loop
-      //    This function repeatedly calls https://api.anthropic.com/v1/messages 
-      //    until no more "tool_use" is requested.
       elizaLogger.info("[computerUseAction] Starting multi-turn computer use...");
-
       const finalMessages = await multiTurnComputerUse({
-        apiKey: config.ANTHROPIC_API_KEY,
+        apiKey: anthropicKey,
         messages: conversation,
+        // ephemeralPromptCaching => true to ephemeral-ize the last ~3 user msgs
         ephemeralPromptCaching: true,
         tokenEfficientTools: false,
       });
 
-      // 7) finalMessages is updated conversation with assistant responses + tool results
+      // 7) Update the memory with final conversation
       existingMemory.content.conversation = finalMessages;
-
-      // Because we do NOT have "updateMemory", we can do this:
-      //  - delete the old memory
-      //  - re-create with the same ID
+      // Replace the old memory record (since we lack updateMemory)
       await runtime.messageManager.removeMemory(roomId);
       await runtime.messageManager.createMemory(existingMemory);
 
@@ -160,15 +154,16 @@ export const computerUseAction: Action = {
         const blocks = JSON.parse(finalText);
         finalText = convertBlocksToText(blocks);
       } catch (err) {
-        // fallback
+        // fallback if JSON parse fails
       }
 
-      // 9) callback to Eliza
+      // 9) Return the final text (Anthropic's output) via callback
       elizaLogger.success(`[computerUseAction] Final text => ${finalText}`);
       if (callback) {
         callback({ text: finalText });
       }
       return true;
+
     } catch (error: any) {
       elizaLogger.error("[computerUseAction] error:", error);
       if (callback) {
@@ -180,5 +175,6 @@ export const computerUseAction: Action = {
       return false;
     }
   },
+
   examples: getComputerUseExamples as ActionExample[][],
 };
