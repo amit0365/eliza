@@ -135,7 +135,7 @@ export const computerUseAction: Action = {
 
       let finalText = lastMsg.content;
       try {
-        const blocks = JSON.parse(finalText);
+        const blocks = toBlocksArray(finalText);
         finalText = convertBlocksToText(blocks);
       } catch {
         // fallback
@@ -191,4 +191,46 @@ function convertBlocksToText(blocks: any[]): string {
       }
     })
     .join("\n");
+}
+
+/**
+ * toBlocksArray takes `assistantContent` (which might be a string or array)
+ * and returns a guaranteed array of content-block objects.
+ */
+function toBlocksArray(assistantContent: unknown): any[] {
+  // If it’s already an array of objects, assume it’s valid
+  if (Array.isArray(assistantContent)) {
+    return assistantContent;
+  }
+
+  // If it’s a string, see if it might be JSON
+  if (typeof assistantContent === "string") {
+    const trimmed = assistantContent.trim();
+    // Quick shape check: must start with '[' or '{'
+    if (
+      (trimmed.startsWith("[") && trimmed.endsWith("]")) ||
+      (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        // If parse yields an array, return it
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+        // If parse yields an object, wrap it in an array
+        return [parsed];
+      } catch {
+        // fall through to fallback
+      }
+    }
+  }
+
+  // Fallback: if we can’t parse or it’s not an array,
+  // return a single text block containing the raw content
+  return [
+    {
+      type: "text",
+      text: String(assistantContent),
+    },
+  ];
 }
