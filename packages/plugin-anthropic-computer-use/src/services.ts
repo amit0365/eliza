@@ -28,59 +28,51 @@ The current date is ${today}.
 </IMPORTANT>`;
 }
 
-/** 
- * Python: _inject_prompt_caching
- * Mark ephemeral blocks for last ~3 user turns.
+/**
+ * Mark ephemeral blocks for the last ~3 user messages
  */
-export function _injectPromptCaching(messages: BetaMessageParam[]) {
+export function _injectPromptCaching(messages: any[]) {
   let breakpointsRemaining = 3;
-  // go backwards
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
     if (msg.role === "user" && Array.isArray(msg.content)) {
       if (breakpointsRemaining > 0) {
         breakpointsRemaining--;
-        // Mark the last block with ephemeral
-        const contentLen = msg.content.length;
-        if (contentLen > 0) {
-          (msg.content[contentLen - 1] as any).cache_control = { type: "ephemeral" };
+        const len = msg.content.length;
+        if (len > 0) {
+          (msg.content[len - 1] as any).cache_control = { type: "ephemeral" };
         }
       } else {
-        // remove ephemeral if any
-        const contentLen = msg.content.length;
-        if (contentLen > 0) {
-          delete (msg.content[contentLen - 1] as any).cache_control;
+        const len = msg.content.length;
+        if (len > 0 && (msg.content[len - 1] as any).cache_control) {
+          delete (msg.content[len - 1] as any).cache_control;
         }
-        break;
       }
     }
   }
 }
 
 /**
- * Python: _maybe_filter_to_n_most_recent_images
- * We remove older images from the conversation to reduce token usage.
+ * Keep only N most recent images among tool_result blocks
  */
 export function _maybeFilterToNMostRecentImages(
-  messages: BetaMessageParam[],
+  messages: any[],
   imagesToKeep: number,
   minRemovalThreshold: number
 ) {
   if (!imagesToKeep) return;
 
-  // Gather all "tool_result" blocks
-  const toolResults: BetaToolResultBlockParam[] = [];
+  const toolResults: any[] = [];
   for (const msg of messages) {
     if (Array.isArray(msg.content)) {
       for (const block of msg.content) {
         if (block.type === "tool_result") {
-          toolResults.push(block as BetaToolResultBlockParam);
+          toolResults.push(block);
         }
       }
     }
   }
 
-  // count how many images total
   let totalImages = 0;
   for (const tr of toolResults) {
     if (Array.isArray(tr.content)) {
@@ -91,23 +83,20 @@ export function _maybeFilterToNMostRecentImages(
       }
     }
   }
-
   let imagesToRemove = totalImages - imagesToKeep;
   imagesToRemove -= imagesToRemove % minRemovalThreshold;
 
-  // remove from oldest
   for (const tr of toolResults) {
-    if (Array.isArray(tr.content)) {
-      const newContent = [];
-      for (const c of tr.content) {
-        if (c.type === "image" && imagesToRemove > 0) {
-          imagesToRemove--;
-          continue;
-        }
-        newContent.push(c);
+    if (!Array.isArray(tr.content)) continue;
+    const newContent = [];
+    for (const c of tr.content) {
+      if (c.type === "image" && imagesToRemove > 0) {
+        imagesToRemove--;
+        continue;
       }
-      tr.content = newContent;
+      newContent.push(c);
     }
+    tr.content = newContent;
   }
 }
 

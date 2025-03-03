@@ -11,10 +11,9 @@ import {
 import { validateAnthropicConfig } from "../environment";
 import { getComputerUseExamples } from "../examples";
 import { multiTurnComputerUse } from "../loop"; 
-import { BetaMessageParam } from "../types";  // or your own message types
 
 /**
- * Suppose we have your memory creation logic, etc.
+ * Builds a Memory record for storing the entire computer-use conversation.
  */
 function createComputerUseMemory({
   roomId,
@@ -33,49 +32,32 @@ function createComputerUseMemory({
     content: {
       source: "anthropic-computer-use",
       text: "Computer use conversation",
-      conversation,
+      conversation, // store conversation array
     },
     embedding: [],
   };
 }
 
 /**
- * Convert blocks => a single text string for partial display
- */
-function convertBlocksToText(content: any[]): string {
-  return content
-    .map((block) => {
-      if (block.type === "text") {
-        return block.text;
-      } else if (block.type === "tool_use") {
-        return `[tool request: ${block.name}]`;
-      } else if (block.type === "tool_result") {
-        if (typeof block.content === "string") {
-          return block.content;
-        } else if (Array.isArray(block.content)) {
-          return block.content
-            .map((c) => (c.type === "text" ? c.text : "[image omitted]"))
-            .join("\n");
-        }
-        return "[tool result]";
-      }
-      return "";
-    })
-    .join("\n");
-}
-
-/**
- * This action calls `multiTurnComputerUse` but now sends 
- * each partial assistant message to the front-end via `callback({text:...})`.
+ * The Action that triggers a multi-turn "computer use" loop with the standard endpoint,
+ * storing conversation to memory. 
+ * 
+ * We do NOT produce any "Eliza" text ourselves. Instead, each 
+ * partial "assistant" response from Anthropic is sent directly back 
+ * via `callback({ text: partialText, type: "partial" })`.
  */
 export const computerUseAction: Action = {
   name: "ANTHROPIC_COMPUTER_USE",
-  similes: ["ANTHROPIC","COMPUTER","BASH","TOOL","BROWSE","SEARCH","OPEN","WEBSITE"],
-  description: "Use Anthropic's multi-turn loop with partial updates",
+  similes: ["ANTHROPIC", "COMPUTER", "BASH", "TOOL", "BROWSE", "SEARCH", "OPEN", "WEBSITE"],
+  description:
+    "Use Anthropic's multi-turn loop to run local computer-use tools, returning partial + final responses. No Eliza text is produced here.",
+
   validate: async (runtime: IAgentRuntime) => {
+    // Ensure we have an Anthropic key
     await validateAnthropicConfig(runtime);
     return true;
   },
+
   handler: async (
     runtime: IAgentRuntime,
     message: Memory,
@@ -84,74 +66,129 @@ export const computerUseAction: Action = {
     callback: HandlerCallback
   ) => {
     try {
-      // 1) Prepare memory
+      // 1) Identify the memory record ID
       const roomId = ("anthropic_computeruse_" + runtime.agentId) as UUID;
+
+      // 2) Attempt to load existing memory
       let existingMemory = await runtime.messageManager.getMemoryById(roomId);
+
       if (!existingMemory) {
-        existingMemory = createComputerUseMemory({ roomId, runtime, conversation: [] });
+        // Create if not found
+        existingMemory = createComputerUseMemory({
+          roomId,
+          runtime,
+          conversation: [],
+        });
         await runtime.messageManager.createMemory(existingMemory);
       }
+
+      // 3) Retrieve conversation array
       const conversation = (existingMemory.content.conversation as any[]) || [];
 
-      // 2) Append user’s new message
-      const userText = message.content?.text || "No user text";
+      // 4) Append the user's new message
+      const userText = message.content?.text || "Hello from user";
       conversation.push({ role: "user", content: userText });
 
-      // 3) Validate config
+      // 5) Validate config (Anthropic key, etc.)
       const config = await validateAnthropicConfig(runtime);
+      const anthropicKey = config.ANTHROPIC_API_KEY;
 
-      // 4) Call multiTurnComputerUse with an onIntermediate callback
-      elizaLogger.info("[computerUseAction] Starting multi-turn with partial updates...");
+      // 6) Call the multi-turn loop. 
+      //    Provide an onIntermediate callback to show partial responses:
+      elizaLogger.info("[computerUseAction] Starting multi-turn computer use...");
+
       const finalMessages = await multiTurnComputerUse({
-        apiKey: config.ANTHROPIC_API_KEY,
+        apiKey: anthropicKey,
         messages: conversation,
-        ephemeralPromptCaching: false,
+        ephemeralPromptCaching: true,
         tokenEfficientTools: false,
-        // here's the key part:
+
+        // New callback that runs every time the model sends an assistant message
         onIntermediate: async (assistantBlocks) => {
-          // Convert blocks => text
+          // Convert blocks => string
           const partialText = convertBlocksToText(assistantBlocks);
-          // Send to the user
+          // Send it to the UI
           if (callback) {
-            await callback({ text: partialText, type: "partial" });
+            await callback({
+              text: partialText,
+              type: "partial", 
+            });
           }
-        }
+        },
       });
 
-      // 5) Now that the loop is done, store final conversation
+      // 7) The final conversation from multiTurnComputerUse
       existingMemory.content.conversation = finalMessages;
-      // Overwrite memory
+
+      // Because we do NOT have updateMemory, we do a remove + create
       await runtime.messageManager.removeMemory(roomId);
       await runtime.messageManager.createMemory(existingMemory);
 
-      // 6) The last message is the final assistant message
+      // 8) parse the last assistant message for a final text
       const lastMsg = finalMessages[finalMessages.length - 1];
       if (!lastMsg || lastMsg.role !== "assistant") {
-        if (callback) callback({ text: "No final assistant response found." });
+        if (callback) {
+          callback({ text: "No final assistant response found." });
+        }
         return true;
       }
 
-      let finalText = "";
+      let finalText = lastMsg.content;
       try {
-        const blocks = JSON.parse(lastMsg.content);
+        const blocks = JSON.parse(finalText);
         finalText = convertBlocksToText(blocks);
       } catch {
-        finalText = lastMsg.content; // fallback
+        // fallback
       }
 
-      // 7) Send that final text too, if you want it distinct from partial
+      // 9) send the final text
+      elizaLogger.success(`[computerUseAction] Final text => ${finalText}`);
       if (callback) {
-        await callback({ text: finalText, type: "final" });
+        callback({ text: finalText, type: "final" });
       }
       return true;
-
     } catch (error: any) {
       elizaLogger.error("[computerUseAction] error:", error);
       if (callback) {
-        callback({ text: `Error: ${error.message}`, type: "error" });
+        callback({
+          text: `Error: ${error.message}`,
+          content: { error: error.message },
+        });
       }
       return false;
     }
   },
+
   examples: getComputerUseExamples as ActionExample[][],
 };
+
+function convertBlocksToText(blocks: any[]): string {
+  if (!Array.isArray(blocks)) {
+    return typeof blocks === "string" ? blocks : JSON.stringify(blocks);
+  }
+
+  return blocks
+    .map((block) => {
+      switch (block.type) {
+        case "text":
+          return block.text;
+        case "tool_result":
+          if (typeof block.content === "string") {
+            return block.content;
+          } else if (Array.isArray(block.content)) {
+            // flatten
+            return block.content
+              .map((c) => (c.type === "text" ? c.text : "[image omitted]"))
+              .join("\n");
+          }
+          return "[tool result]";
+        case "image":
+          return "[image omitted]";
+        case "thinking":
+          return "[thinking hidden]";
+        default:
+          return "";
+      }
+    })
+    .join("\n");
+}
