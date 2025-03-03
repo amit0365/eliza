@@ -135,7 +135,7 @@ export const computerUseAction: Action = {
 
       let finalText = lastMsg.content;
       try {
-        const blocks = toBlocksArray(finalText);
+        const blocks = JSON.parse(finalText);
         finalText = convertBlocksToText(blocks);
       } catch {
         // fallback
