@@ -29,6 +29,11 @@ export default defineConfig(({ mode }) => {
                 env.SERVER_BASE_URL
             )
         },
+        server: {
+            allowedHosts: [
+                "8d72f81ef5cdd134c82d2fc0aa7da52d329c9129-5173.dstack-prod5.phala.network"
+            ]
+        },
         build: {
             outDir: "dist",
             minify: true,
