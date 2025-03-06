@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
         envDir,
         define: {
             "import.meta.env.VITE_SERVER_PORT": JSON.stringify(
-                env.SERVER_PORT || "3000"
+                env.SERVER_PORT || ""
             ),
             "import.meta.env.VITE_SERVER_URL": JSON.stringify(
                 env.SERVER_URL || "http://localhost"
@@ -31,7 +31,7 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             allowedHosts: [
-                "8d72f81ef5cdd134c82d2fc0aa7da52d329c9129-5173.dstack-prod5.phala.network"
+                env.ALLOWED_HOSTS
             ]
         },
         build: {
