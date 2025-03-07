@@ -10,7 +10,7 @@ import {
 } from "@elizaos/core";
 import { validateAnthropicConfig } from "../environment";
 import { getComputerUseExamples } from "../examples";
-import { multiTurnComputerUse } from "../loop";
+import { multiTurnComputerUse } from "../loop"; // Our final-only multiTurnComputerUse
 
 /**
  * Builds a Memory record for storing the entire computer-use conversation.
@@ -38,16 +38,15 @@ function createComputerUseMemory({
   };
 }
 
-/**
- * Convert an array of Anthropic blocks into a plain string.
- * We show only final text, ignoring partial or tool blocks if you like.
+/** 
+ * Convert an array of blocks into a plain text string. 
+ * We omit any comedic or older assistant lines. 
  */
-function convertBlocksToText(blocks: any[]): string {
+function blocksToText(blocks: any[]): string {
   if (!Array.isArray(blocks)) {
-    // If it's a single object or string, convert to array for uniformity
-    return typeof blocks === "string" ? blocks : JSON.stringify(blocks);
+    if (typeof blocks === "string") return blocks;
+    return JSON.stringify(blocks);
   }
-
   return blocks
     .map((block) => {
       switch (block.type) {
@@ -56,11 +55,9 @@ function convertBlocksToText(blocks: any[]): string {
         case "image":
           return "[image omitted]";
         case "tool_result":
-          // If you want to omit tool results from final text entirely, do empty string
-          // or show a simple note:
+          // We can omit or show a note
           return "[tool_result omitted]";
         case "thinking":
-          // Hide thinking
           return "";
         default:
           return "";
@@ -70,19 +67,19 @@ function convertBlocksToText(blocks: any[]): string {
 }
 
 /**
- * The Action that triggers the multi-turn loop:
- *  - No intermediate partial callbacks
- *  - Only the final assistant message from Anthropic is returned
- *  - No comedic Eliza text
+ * An Action that calls multiTurnComputerUse to run local "computer" usage with Anthropic,
+ * returning ONLY the final assistant message from Anthropic. 
+ * 
+ * We remove any older "assistant" lines from memory to avoid comedic Eliza text. 
+ * No partial or intermediate output.
  */
 export const computerUseAction: Action = {
   name: "ANTHROPIC_COMPUTER_USE",
   similes: ["ANTHROPIC", "COMPUTER", "BASH", "TOOL", "BROWSE", "SEARCH", "OPEN", "WEBSITE"],
   description:
-    "Use Anthropic's multi-turn loop to run local computer-use tools, returning only the final response. No partial or Eliza messages.",
-
+    "Runs the multi-turn loop with Anthropic to use local computer tools, returning only the final AI message. No comedic or partial lines.",
+  
   validate: async (runtime: IAgentRuntime) => {
-    // Ensure we have an Anthropic key
     await validateAnthropicConfig(runtime);
     return true;
   },
@@ -95,11 +92,11 @@ export const computerUseAction: Action = {
     callback: HandlerCallback
   ) => {
     try {
-      // 1) Memory record ID
+      // 1) Identify the memory record
       const roomId = ("anthropic_computeruse_" + runtime.agentId) as UUID;
-
-      // 2) Load or create memory
       let existingMemory = await runtime.messageManager.getMemoryById(roomId);
+
+      // 2) If not found, create
       if (!existingMemory) {
         existingMemory = createComputerUseMemory({
           roomId,
@@ -109,61 +106,65 @@ export const computerUseAction: Action = {
         await runtime.messageManager.createMemory(existingMemory);
       }
 
-      // 3) Retrieve conversation
+      // 3) Retrieve conversation array
       const conversation = (existingMemory.content.conversation as any[]) || [];
 
-      // 4) Append the user's new message
+      // 4) Remove any existing "assistant" messages from memory 
+      //    that might contain comedic lines from an older "Eliza" flow.
+      const filtered = conversation.filter((m) => m.role !== "assistant");
+
+      // 5) Append the new user message
       const userText = message.content?.text || "Hello from user";
-      conversation.push({ role: "user", content: userText });
+      filtered.push({ role: "user", content: userText });
 
-      // 5) Validate config (Anthropic key, etc.)
+      // 6) Validate config
       const config = await validateAnthropicConfig(runtime);
-      const anthropicKey = config.ANTHROPIC_API_KEY;
 
-      // 6) Call multiTurnComputerUse for final-only results
-      elizaLogger.info("[computerUseAction] Starting multi-turn computer use (final-only).");
+      // 7) Call multiTurnComputerUse => final-only approach
+      elizaLogger.info("[computerUseAction] Starting multi-turn computer use for final only.");
       const finalMessages = await multiTurnComputerUse({
-        apiKey: anthropicKey,
-        messages: conversation,
-        ephemeralPromptCaching: false,
+        apiKey: config.ANTHROPIC_API_KEY,
+        messages: filtered,
+        ephemeralPromptCaching: false, // or true if you want ephemeral caching
         tokenEfficientTools: false,
       });
 
-      // 7) Save final conversation
+      // 8) Save final conversation to memory
       existingMemory.content.conversation = finalMessages;
       await runtime.messageManager.removeMemory(roomId);
       await runtime.messageManager.createMemory(existingMemory);
 
-      // 8) The last message is the final assistant text
+      // 9) The last message should be from Anthropic's assistant
       const lastMsg = finalMessages[finalMessages.length - 1];
       if (!lastMsg || lastMsg.role !== "assistant") {
         if (callback) {
-          callback({ text: "No final assistant response found." });
+          callback({ text: "No final assistant response found" });
         }
         return true;
       }
 
-      // Possibly parse JSON blocks
+      // Possibly parse the final blocks
       let finalText = lastMsg.content;
       try {
         const blocks = JSON.parse(finalText);
-        finalText = convertBlocksToText(blocks);
+        finalText = blocksToText(blocks);
       } catch {
         // fallback
       }
 
-      // 9) Return the final text (only from Anthropic).
-      elizaLogger.success(`[computerUseAction] Final text => ${finalText}`);
+      // 10) Return only that final text
+      elizaLogger.success("[computerUseAction] Final text => " + finalText);
       if (callback) {
         callback({ text: finalText });
       }
       return true;
-    } catch (error: any) {
-      elizaLogger.error("[computerUseAction] error:", error);
+
+    } catch (err: any) {
+      elizaLogger.error("[computerUseAction] error:", err);
       if (callback) {
         callback({
-          text: `Error: ${error.message}`,
-          content: { error: error.message },
+          text: `Error: ${err.message}`,
+          content: { error: err.message },
         });
       }
       return false;
