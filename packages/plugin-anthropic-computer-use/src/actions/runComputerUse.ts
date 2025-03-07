@@ -120,6 +120,7 @@ export const computerUseAction: Action = {
       // 7) The final conversation from multiTurnComputerUse
       const [first, ...rest] = finalMessages; // fliter out eliza message, hack do it properly
       existingMemory.content.conversation = rest;
+      
       // Because we do NOT have updateMemory, we do a remove + create
       await runtime.messageManager.removeMemory(roomId);
       await runtime.messageManager.createMemory(existingMemory);
