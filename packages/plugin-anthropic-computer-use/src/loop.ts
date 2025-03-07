@@ -21,7 +21,7 @@ export async function multiTurnComputerUse(args: {
 }): Promise<ChatMessage[]> {
   const {
     apiKey,
-    model = "claude-3-5-20250124",
+    model = "claude-3-5-20241022",
     systemPrompt = "You can use the 'computer' or 'bash' tools...",
     messages,
     ephemeralPromptCaching = false,
@@ -59,7 +59,7 @@ export async function multiTurnComputerUse(args: {
     "x-api-key": apiKey,
     "content-type": "application/json",
     "anthropic-version": "2023-06-01",
-    "anthropic-beta": anthropicBetaHeader,
+    "anthropic-beta": betaFlags.join(","),
   };
 
   while (true) {
